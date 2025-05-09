@@ -177,19 +177,22 @@ where
                 }
             }
 
-
+            let mut seen_indeces: HashSet<usize> = HashSet::new();
             for index in maybe_token_indeces {
 
-                if index < 1 || index >= original.target_bytes().len() -2 {
+                if index < 1 || index >= original.target_bytes().len() -1 {
+                    continue;
+                }
+
+                if seen_indeces.contains(&index) {
                     continue;
                 }
 
                 
                 // analyzing the diff itself left and right
+                seen_indeces.insert(index);
                 let mut raw_bytes = current_input.to_vec();
                 raw_bytes[index] = mutated.target_bytes()[index];
-
-            
                 let raw_coverage = self.get_input_coverage(
                     &raw_bytes.into(), 
                     fuzzer, 
@@ -206,6 +209,7 @@ where
                         break;
                     }
 
+                    seen_indeces.insert(left_index);
                     let mut left = current_input.clone().to_vec();
                     left[left_index] = mutated.target_bytes()[index];
                     let left_coverage = self.get_input_coverage(
@@ -226,10 +230,11 @@ where
                 let mut right_index = index + 1;
                 loop {
 
-                    if right_index > current_input.len() -1 {
+                    if right_index >= current_input.len() {
                         break;
                     }
 
+                    seen_indeces.insert(right_index);
                     let mut right = current_input.clone().to_vec();
                     right[right_index] = mutated.target_bytes()[index];
                     let right_coverage = self.get_input_coverage(
