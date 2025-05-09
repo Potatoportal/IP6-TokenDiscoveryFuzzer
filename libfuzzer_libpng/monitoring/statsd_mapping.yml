@@ -1,5 +1,0 @@
-mappings:
-- match: "fuzzing.*"
-  name: "fuzzing"
-  labels:
-      type: "$1"

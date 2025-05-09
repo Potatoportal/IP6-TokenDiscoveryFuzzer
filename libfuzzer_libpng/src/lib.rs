@@ -15,7 +15,7 @@ use libafl::{
     feedbacks::{CrashFeedback, MaxMapFeedback, TimeFeedback, TimeoutFeedback},
     fuzzer::{Fuzzer, StdFuzzer},
     inputs::{BytesInput, HasTargetBytes},
-    monitors::PrometheusMonitor,
+    monitors::{self, MultiMonitor, PrometheusMonitor},
     mutators::{
         havoc_mutations::havoc_mutations,
         scheduled::{tokens_mutations, StdScheduledMutator},
@@ -93,12 +93,14 @@ pub extern "C" fn libafl_main() {
 /// The actual fuzzer
 fn fuzz(corpus_dirs: &[PathBuf], objective_dir: PathBuf, broker_port: u16) -> Result<(), Error> {
     // 'While the stats are state, they are usually used in the broker - which is likely never restarted
-    let prometheus_mon = PrometheusMonitor::new("localhost:8081".to_string(), |s| println!("{s}"));
-    //let multi_monitor = MultiMonitor::new(|s| println!("{s}")).append(prometheus_mon);
+    let mon = PrometheusMonitor::new("0.0.0.0:8080".to_string(), |s| log::info!("{s}"));
+    let multi = MultiMonitor::new(|s| println!("{s}"));
+    let monitor = tuple_list!(mon, multi);
+
 
     // The restarting state will spawn the same process again as child, then restarted it each time it crashes.
     let (state, mut restarting_mgr) =
-        match setup_restarting_mgr_std(prometheus_mon, broker_port, EventConfig::AlwaysUnique) {
+        match setup_restarting_mgr_std(monitor, broker_port, EventConfig::AlwaysUnique) {
             Ok(res) => res,
             Err(err) => match err {
                 Error::ShuttingDown => {
