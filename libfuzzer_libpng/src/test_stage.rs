@@ -1,4 +1,4 @@
-use std::{borrow::Cow, collections::HashSet, marker::PhantomData};
+use std::{borrow::Cow, collections::HashSet, fs::File, io::Write, marker::PhantomData};
 
 use libafl::{
     corpus::{Corpus, CorpusId, HasCurrentCorpusId},
@@ -72,9 +72,15 @@ where
         };
         let corpus_id = self.mutate_and_evaluate(input, fuzzer, executor, state, manager)?;
 
+
+        if self.num_tested % 10000 == 0{
+            self.clean_tokens(state);
+        }
+
         // if new entry in corpus run token discovery
         if corpus_id.is_some() {
             println!("Entering token discovery");
+            
             self.search_tokens(corpus_id, fuzzer, executor, state, manager)?;
             println!();
         }
@@ -253,8 +259,9 @@ where
                 }
 
                 let token = &current_input.clone()[left_index..right_index].to_vec();
+
                 let token_data = state.metadata_mut::<Tokens>()?;            
-                if !token_data.contains(token) {
+                if !token_data.iter().any(|v| v.windows(token.len()).any(|window| window == token)) {
                     token_data.add_token(token);
                     let ascii = unsafe {std::str::from_utf8_unchecked(token)};
                     let byte_len = right_index - left_index;
@@ -287,6 +294,28 @@ where
  
         return diffs;
     }
+
+    pub fn clean_tokens(&self, state: &mut S) {
+        // find diff between original and mutated
+        let tokens_clone = state.metadata_mut::<Tokens>().unwrap().clone();
+
+        let o_size = tokens_clone.tokens().len();
+
+        let mut unique: Vec<Vec<u8>> = Vec::new();
+
+        for token in tokens_clone.iter(){
+            
+            if !tokens_clone.iter().any(|v| v.windows(token.len()).any(|window| window == token)) {
+                    unique.push(token.to_vec());
+            }
+        }
+        //replace Token metadata with new unique Token list.
+        state.add_metadata(Tokens::from(unique.into_boxed_slice()));
+        println!("Cleaned {} Tokens", o_size-state.metadata_mut::<Tokens>().unwrap().tokens().len());
+        
+
+    }
+    
 
     fn current_testcase_as_input(&self, state: &mut S) -> Result<Option<I>, Error> {
         // transform Testcase<I> containing the input to I
@@ -339,7 +368,7 @@ where
         // check if mutated input is interesting
         let evaluation = fuzzer.evaluate_filtered(state, executor, manager, &untransfomred)?;
         let (exec_result, corpus_id) = evaluation;
-
+        /*
         if exec_result.is_corpus() {
             println!("Found new interesting input adding to corpus");
         }
@@ -347,6 +376,7 @@ where
         if exec_result.is_solution() {
             println!("Found new solution persisting on disk");
         }
+        */
 
         // check for post process in the fuzzer
         self.mutator_mut().post_exec(state, corpus_id)?;
