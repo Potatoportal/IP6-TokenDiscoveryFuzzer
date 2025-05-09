@@ -1,0 +1,31 @@
+networks:
+  statsd-net:
+    driver: bridge
+
+volumes:
+  grafana-data:
+
+services:
+  prometheus:
+    image: prom/prometheus
+    container_name: prometheus
+    volumes:
+      - .:/prometheus
+    command:
+      - '--config.file=../prometheus.yml'
+    restart: unless-stopped
+    ports:
+      - "9090:9090"
+    networks:
+      - statsd-net
+
+  grafana:
+    image: grafana/grafana
+    container_name: grafana
+    volumes:
+      - grafana-data:/var/lib/grafana
+    restart: unless-stopped
+    ports:
+        - "3000:3000"
+    networks:
+      - statsd-net
