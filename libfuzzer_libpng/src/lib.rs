@@ -15,7 +15,7 @@ use libafl::{
     feedbacks::{CrashFeedback, MaxMapFeedback, TimeFeedback, TimeoutFeedback},
     fuzzer::{Fuzzer, StdFuzzer},
     inputs::{BytesInput, HasTargetBytes},
-    monitors::{self, MultiMonitor, PrometheusMonitor},
+    monitors::{MultiMonitor, PrometheusMonitor},
     mutators::{
         havoc_mutations::havoc_mutations,
         scheduled::{tokens_mutations, StdScheduledMutator},

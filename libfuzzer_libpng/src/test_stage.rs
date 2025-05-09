@@ -1,4 +1,4 @@
-use std::{borrow::Cow, collections::HashSet, fs::File, io::Write, marker::PhantomData};
+use std::{borrow::Cow, collections::HashSet, marker::PhantomData};
 
 use libafl::{
     corpus::{Corpus, CorpusId, HasCurrentCorpusId},
@@ -368,7 +368,7 @@ where
         // check if mutated input is interesting
         let evaluation = fuzzer.evaluate_filtered(state, executor, manager, &untransfomred)?;
         let (exec_result, corpus_id) = evaluation;
-        /*
+    
         if exec_result.is_corpus() {
             println!("Found new interesting input adding to corpus");
         }
@@ -376,7 +376,6 @@ where
         if exec_result.is_solution() {
             println!("Found new solution persisting on disk");
         }
-        */
 
         // check for post process in the fuzzer
         self.mutator_mut().post_exec(state, corpus_id)?;
