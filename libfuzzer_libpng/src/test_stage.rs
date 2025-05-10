@@ -16,10 +16,7 @@ use libafl::{
     HasMetadata, 
     HasNamedMetadata
 };
-use libafl_bolts::{tuples::{Append, Handle, Handled, MatchNameRef}, Named};
-
-use crate::SeenTestCases;
-
+use libafl_bolts::{tuples::{Handle, Handled, MatchNameRef}, Named};
 
 pub const STAGE_NAME: &str = "Test Stage";
 pub struct TestStage<E, EM, I, S, M, F, C, Z, O>{
@@ -71,11 +68,6 @@ where
             return Ok(());
         };
         let corpus_id = self.mutate_and_evaluate(input, fuzzer, executor, state, manager)?;
-
-
-        if self.num_tested % 10000 == 0{
-            self.clean_tokens(state);
-        }
 
         // if new entry in corpus run token discovery
         if corpus_id.is_some() {
@@ -147,44 +139,10 @@ where
 
     
         let current_input = original.target_bytes().clone();
-        let seen_cases = state.metadata_mut::<SeenTestCases>()?;
-        
-        // if we have not yet seen this testcase add the byte/index pair for later comparison
-        if !seen_cases.testcases_mut().contains(&current_input.to_vec()) {
-            let index_to_value = seen_cases.index_to_value_map_mut();
-            for (i, value) in current_input.iter().enumerate() {
-                if !index_to_value.contains_key(&i) {
-                    index_to_value.insert(i, HashSet::new());
-                }
-
-                let optional_set = index_to_value.get_mut(&i);
-                let Some(values) = optional_set else {
-                    return Err(Error::illegal_state("The HashSet could not be initialized"));
-                };
-                let _ = values.append(value);
-            }
-        }
-
         let diff_indeces = self.search_diff_index(&original, &mutated);
         if !diff_indeces.is_empty() {
-
-            // check if the byte/index pair is unique to other testcases
-            let mut maybe_token_indeces = Vec::<usize>::new();
-            let index_to_value = seen_cases.index_to_value_map_mut();
-            for &index in diff_indeces.iter() {
-                let mutated_value = mutated.target_bytes()[index];
-                let option_set = index_to_value.get(&index);
-                let Some(values) = option_set else {
-                    return Err(Error::key_not_found("The index has not been seen in any testcases"));
-                };
-    
-                if !values.contains(&mutated_value) {
-                    maybe_token_indeces.push(index);
-                }
-            }
-
             let mut seen_indeces: HashSet<usize> = HashSet::new();
-            for index in maybe_token_indeces {
+            for index in diff_indeces {
 
                 if index < 1 || index >= original.target_bytes().len() -1 {
                     continue;
@@ -194,7 +152,6 @@ where
                     continue;
                 }
 
-                
                 // analyzing the diff itself left and right
                 seen_indeces.insert(index);
                 let mut raw_bytes = current_input.to_vec();
@@ -206,7 +163,6 @@ where
                     state,
                     manager
                 )?;
-
 
                 let mut left_index = index -1;
                 loop {
@@ -261,7 +217,7 @@ where
                 let token = &current_input.clone()[left_index..right_index].to_vec();
 
                 let token_data = state.metadata_mut::<Tokens>()?;            
-                if !token_data.iter().any(|v| v.windows(token.len()).any(|window| window == token)) {
+                if !token_data.contains(token) {
                     token_data.add_token(token);
                     let ascii = unsafe {std::str::from_utf8_unchecked(token)};
                     let byte_len = right_index - left_index;
