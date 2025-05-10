@@ -167,7 +167,7 @@ where
                 let mut left_index = index -1;
                 loop {
 
-                    if left_index <= 0 {
+                    if left_index <= 0 || index - left_index > 15{
                         break;
                     }
 
@@ -192,7 +192,7 @@ where
                 let mut right_index = index + 1;
                 loop {
 
-                    if right_index >= current_input.len() {
+                    if right_index >= current_input.len() || right_index - index > 15 {
                         break;
                     }
 
