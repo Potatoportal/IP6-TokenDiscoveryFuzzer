@@ -261,7 +261,9 @@ where
                 let token = &current_input.clone()[left_index..right_index].to_vec();
 
                 let token_data = state.metadata_mut::<Tokens>()?;            
-                if !token_data.iter().any(|v| v.windows(token.len()).any(|window| window == token)) {
+                if !token_data.iter()
+                .filter(|v| (v.len() as isize - token.len() as isize).abs() == 1)
+                .any(|v| v.windows(token.len()).any(|window| window == token)) {
                     token_data.add_token(token);
                     let ascii = unsafe {std::str::from_utf8_unchecked(token)};
                     let byte_len = right_index - left_index;
@@ -305,7 +307,9 @@ where
 
         for token in tokens_clone.iter(){
             
-            if !tokens_clone.iter().any(|v| v.windows(token.len()).any(|window| window == token)) {
+            if !tokens_clone.iter()
+            .filter(|v| (v.len() as isize - token.len() as isize).abs() == 1)
+            .any(|v| v.windows(token.len()).any(|window| window == token)) {
                     unique.push(token.to_vec());
             }
         }
