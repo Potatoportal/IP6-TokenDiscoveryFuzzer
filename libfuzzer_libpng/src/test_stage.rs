@@ -68,6 +68,10 @@ where
             return Ok(());
         };
         let corpus_id = self.mutate_and_evaluate(input, fuzzer, executor, state, manager)?;
+        
+        if self.num_tested >= 10000 {
+            self.clean_tokens(state);
+        }
 
         // if new entry in corpus run token discovery
         if corpus_id.is_some() {
@@ -167,7 +171,7 @@ where
                 let mut left_index = index -1;
                 loop {
 
-                    if left_index <= 0 || index - left_index > 15{
+                    if left_index <= 0 || index - left_index >= 4{
                         break;
                     }
 
@@ -192,7 +196,7 @@ where
                 let mut right_index = index + 1;
                 loop {
 
-                    if right_index >= current_input.len() || right_index - index > 15 {
+                    if right_index >= current_input.len() || right_index - index >= 4 {
                         break;
                     }
 

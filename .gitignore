@@ -2,3 +2,5 @@ libfuzzer_libpng/target/
 libfuzzer_libpng/Cargo.lock
 libpng-1.6.37/
 libfuzzer_libpng/fuzzer_libpng
+libfuzzer_libpng/monitoring/grafana-data/
+libfuzzer_libpng/monitoring/prometheus-data/
