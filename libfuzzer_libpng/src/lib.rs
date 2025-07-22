@@ -93,7 +93,7 @@ pub extern "C" fn libafl_main() {
 /// The actual fuzzer
 fn fuzz(corpus_dirs: &[PathBuf], objective_dir: PathBuf, broker_port: u16) -> Result<(), Error> {
     // 'While the stats are state, they are usually used in the broker - which is likely never restarted
-    let mon = PrometheusMonitor::new("0.0.0.0:8081".to_string(), |s| log::info!("{s}"));
+    let mon = PrometheusMonitor::new("0.0.0.0:8080".to_string(), |s| log::info!("{s}"));
     let multi = MultiMonitor::new(|s| println!("{s}"));
     let monitor = tuple_list!(mon, multi);
 
