@@ -169,7 +169,7 @@ where
                 {
                     let token_data = state.metadata_mut::<Tokens>()?;
 
-                    // early return if tokens are under threshold
+                    // early return if tokens are over threshold
                     if token_data.len() >= 100 {
                         return Ok(());
                     }
@@ -204,7 +204,7 @@ where
 
                 loop {
 
-                    if left_index <= 0 {
+                    if left_index <= 0 || index - left_index + 1 >= 2 {
                         break;
                     }
 
@@ -229,7 +229,7 @@ where
 
                 loop {
 
-                    if right_index >= input_bytes.len() {
+                    if right_index >= input_bytes.len() || right_index - index -1 >= 2{
                         break;
                     }
 
