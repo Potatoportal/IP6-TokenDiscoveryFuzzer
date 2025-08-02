@@ -81,20 +81,6 @@ where
                 interesting_corpora.insert(corpus_id);
             }   
         }
-        
-        // search for new tokens every 1000 executions
-        if self.num_tested % 1000 == 0 {
-            let token_data = state.metadata_mut::<Tokens>()?;
-            for token in token_data.iter() {
-                let ascii = unsafe {std::str::from_utf8_unchecked(token)};
-                let byte_len = token.len();
-                println!("The token has {byte_len} bytes");
-                println!("The string representation of the token is: {ascii}");
-                println!();
-            }
-            let empty: Vec<Vec<u8>> = Vec::new();
-            state.add_metadata(Tokens::from(empty)); 
-        }
 
         // go through interesting corpora look for tokens
         for id in interesting_corpora {
@@ -162,29 +148,13 @@ where
         let input_bytes = original.target_bytes().clone();
         let diff_indices = self.search_diff_index(&original, &mutated);
         if !diff_indices.is_empty() {
-            let mut seen_indices: HashSet<usize> = HashSet::new();
             for index in diff_indices {
-
-                // only search for tokens if under threshold
-                {
-                    let token_data = state.metadata_mut::<Tokens>()?;
-
-                    // early return if tokens are over threshold
-                    if token_data.len() >= 100 {
-                        return Ok(());
-                    }
-                }
 
                 if index < 1 {
                     continue;
                 }
 
-                if seen_indices.contains(&index) {
-                    continue;
-                }
-
                 // analyzing the diff itself left and right
-                seen_indices.insert(index);
                 let mut raw_bytes = input_bytes.to_vec();
                 let changed_byte = mutated.target_bytes()[index];
                 raw_bytes[index] = changed_byte;
@@ -208,7 +178,6 @@ where
                         break;
                     }
 
-                    seen_indices.insert(left_index);
                     let original_byte = analyze_bytes[left_index];
                     analyze_bytes[left_index] = changed_byte;
                     let left_coverage = self.get_input_coverage(
@@ -233,7 +202,6 @@ where
                         break;
                     }
 
-                    seen_indices.insert(right_index);
                     let original_byte = analyze_bytes[right_index];
                     analyze_bytes[right_index] = changed_byte;
                     let right_coverage = self.get_input_coverage(
