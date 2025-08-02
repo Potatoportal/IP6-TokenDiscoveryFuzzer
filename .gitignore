@@ -6,3 +6,4 @@ libfuzzer_libpng/monitoring/grafana-data/
 libfuzzer_libpng/monitoring/prometheus-data/
 notes.txt
 fuzzer_metrics/
+coverage_notes
