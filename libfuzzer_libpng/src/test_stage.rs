@@ -62,7 +62,6 @@ where
         
         
         self.num_tested += 1;
-        self.clean_tokens(state);
         let optional_input = self.current_testcase_as_input(state)?;
      
         let Some(input) = optional_input else {
@@ -162,7 +161,6 @@ where
         let input_bytes = original.target_bytes().clone();
         let diff_indices = self.search_diff_index(&original, &mutated);
         if !diff_indices.is_empty() {
-            let mut seen_indices: HashSet<usize> = HashSet::new();
             for index in diff_indices {
 
                 // only search for tokens if under threshold
@@ -179,12 +177,7 @@ where
                     continue;
                 }
 
-                if seen_indices.contains(&index) {
-                    continue;
-                }
-
                 // analyzing the diff itself left and right
-                seen_indices.insert(index);
                 let mut raw_bytes = input_bytes.to_vec();
                 let changed_byte = mutated.target_bytes()[index];
                 raw_bytes[index] = changed_byte;
@@ -208,7 +201,6 @@ where
                         break;
                     }
 
-                    seen_indices.insert(left_index);
                     let original_byte = analyze_bytes[left_index];
                     analyze_bytes[left_index] = changed_byte;
                     let left_coverage = self.get_input_coverage(
@@ -233,7 +225,6 @@ where
                         break;
                     }
 
-                    seen_indices.insert(right_index);
                     let original_byte = analyze_bytes[right_index];
                     analyze_bytes[right_index] = changed_byte;
                     let right_coverage = self.get_input_coverage(
