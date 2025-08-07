@@ -137,15 +137,10 @@ fn fuzz(corpus_dirs: &[PathBuf], objective_dir: PathBuf, broker_port: u16) -> Re
     }
 
     // Setup a basic mutator with a mutational stage
-<<<<<<< Updated upstream
-    let mutator = HavocScheduledMutator::new(havoc_mutations().merge(tokens_mutations()));
-    let mut stages = tuple_list!(StdMutationalStage::new(mutator));
-=======
     let mutator = StdScheduledMutator::new(havoc_mutations().merge(tokens_mutations()));
     let test_stage:TestStage<_, _, BytesInput, _, _, CorpusPowerTestcaseScore, _, _, _> 
         = TestStage::new(mutator, &edges_observer);
     let mut stages = tuple_list!(StdMutationalStage::new(mutator), test_stage);
->>>>>>> Stashed changes
 
     // A random policy to get testcasess from the corpus
     let scheduler = RandScheduler::new();
