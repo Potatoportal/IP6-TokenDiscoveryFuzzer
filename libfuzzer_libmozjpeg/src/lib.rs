@@ -1,17 +1,16 @@
 //! A libfuzzer-like fuzzer with llmp-multithreading support and restarts
-//! The example harness is built for libmozjpeg.
-use mimalloc::MiMalloc;
-#[global_allocator]
-static GLOBAL: MiMalloc = MiMalloc;
+//! The example harness is built for libpng.
+use core::time::Duration;
+use std::{collections::{HashMap, HashSet}, env, path::PathBuf};
 
-use std::{env, path::PathBuf};
+mod test_stage;
 
 use libafl::{
     corpus::{Corpus, InMemoryCorpus, OnDiskCorpus},
     events::{setup_restarting_mgr_std, EventConfig, EventRestarter},
     executors::{inprocess::InProcessExecutor, ExitKind},
-    feedback_or,
-    feedbacks::{CrashFeedback, MaxMapFeedback},
+    feedback_or, feedback_or_fast,
+    feedbacks::{CrashFeedback, MaxMapFeedback, TimeFeedback, TimeoutFeedback},
     fuzzer::{Fuzzer, StdFuzzer},
     inputs::{BytesInput, HasTargetBytes},
     monitors::{MultiMonitor, PrometheusMonitor},
@@ -19,32 +18,61 @@ use libafl::{
         havoc_mutations::havoc_mutations,
         scheduled::{tokens_mutations, StdScheduledMutator},
     },
-    observers::StdMapObserver,
-    schedulers::RandScheduler,
-    stages::mutational::StdMutationalStage,
+    observers::{CanTrack, HitcountsMapObserver, StdMapObserver, TimeObserver},
+    schedulers::{
+        powersched::PowerSchedule, testcase_score::CorpusPowerTestcaseScore, IndexesLenTimeMinimizerScheduler, StdWeightedScheduler
+    },
+    stages::calibrate::CalibrationStage,
     state::{HasCorpus, StdState},
-    Error,
 };
 use libafl_bolts::{
-    rands::StdRand,
-    tuples::{tuple_list, Merge},
-    AsSlice,
-};
-use libafl_targets::{
-    libfuzzer_initialize, libfuzzer_test_one_input, std_edges_map_observer, CMP_MAP,
+    rands::StdRand, 
+    serdeany::RegistryBuilder, 
+    tuples::{tuple_list, Merge}, 
+    AsSlice, 
+    SerdeAny,
+
 };
 
-const ALLOC_MAP_SIZE: usize = 16 * 1024;
-extern "C" {
-    static mut libafl_alloc_map: [usize; ALLOC_MAP_SIZE];
+use libafl_targets::{libfuzzer_initialize, libfuzzer_test_one_input, EDGES_MAP, MAX_EDGES_FOUND};
+use mimalloc::MiMalloc;
+use test_stage::TestStage;
+use serde::{Serialize, Deserialize};
+
+#[global_allocator]
+static GLOBAL: MiMalloc = MiMalloc;
+
+#[derive(Debug, Serialize, Deserialize, SerdeAny)]
+pub struct SeenTestCases {
+    tescases: HashSet<Vec<u8>>,
+    index_to_values: HashMap<usize, HashSet<u8>>,
 }
 
-/// The main fn, usually parsing parameters, and starting the fuzzer
+impl SeenTestCases
+where {
+
+    pub fn new () -> Self {
+        Self { tescases: HashSet::new(), index_to_values: HashMap::new()}
+    }
+
+    pub fn testcases_mut(&mut self) -> &mut HashSet<Vec<u8>> {
+        &mut self.tescases
+    }
+
+    pub fn index_to_value_map_mut(&mut self) -> &mut HashMap<usize, HashSet<u8>> {
+        &mut self.index_to_values
+    }
+}
+
+
+/// The main fn, `no_mangle` as it is a C main
 #[no_mangle]
 pub extern "C" fn libafl_main() {
     // Registry the metadata types used in this fuzzer
     // Needed only on no_std
     // unsafe { RegistryBuilder::register::<Tokens>(); }
+    
+    unsafe {RegistryBuilder::register::<SeenTestCases>();}
 
     println!(
         "Workdir: {:?}",
@@ -65,48 +93,51 @@ fn fuzz(corpus_dirs: &[PathBuf], objective_dir: PathBuf, broker_port: u16) -> Re
     let multi = MultiMonitor::new(|s| println!("{s}"));
     let monitor = tuple_list!(mon, multi);
 
+
     // The restarting state will spawn the same process again as child, then restarted it each time it crashes.
     let (state, mut restarting_mgr) =
-        match setup_restarting_mgr_std(monitor, broker_port, EventConfig::from_name("default")) {
-            Ok(tuple) => tuple,
-            Err(Error::ShuttingDown) => {
-                println!("\nFinished fuzzing. Good bye.");
-                return Ok(());
-            }
-            Err(err) => {
-                panic!("Failed to setup the restarter: {err:?}");
-            }
+        match setup_restarting_mgr_std(monitor, broker_port, EventConfig::AlwaysUnique) {
+            Ok(res) => res,
+            Err(err) => match err {
+                Error::ShuttingDown => {
+                    return Ok(());
+                }
+                _ => {
+                    panic!("Failed to setup the restarter: {err}");
+                }
+            },
         };
 
     // Create an observation channel using the coverage map
-    let edges_observer = unsafe { std_edges_map_observer("edges") };
-
-    // Create an observation channel using the cmp map
     // TODO: This will break soon, fix me! See https://github.com/AFLplusplus/LibAFL/issues/2786
     #[allow(static_mut_refs)] // only a problem on nightly
-    let cmps_observer =
-        unsafe { StdMapObserver::from_mut_ptr("cmps", CMP_MAP.as_mut_ptr(), CMP_MAP.len()) };
-
-    // Create an observation channel using the allocations map
-    // TODO: This will break soon, fix me! See https://github.com/AFLplusplus/LibAFL/issues/2786
-    #[allow(static_mut_refs)] // only a problem on nightly
-    let allocs_observer = unsafe {
-        StdMapObserver::from_mut_ptr(
-            "allocs",
-            libafl_alloc_map.as_mut_ptr(),
-            libafl_alloc_map.len(),
-        )
+    let edges_observer = unsafe {
+        HitcountsMapObserver::new(StdMapObserver::from_mut_ptr(
+            "edges",
+            EDGES_MAP.as_mut_ptr(),
+            MAX_EDGES_FOUND,
+        ))
+        .track_indices()
     };
 
+    // Create an observation channel to keep track of the execution time
+    let time_observer = TimeObserver::new("time");
+
+    let max_map_feedback = MaxMapFeedback::new(&edges_observer);
+
+    let calibration = CalibrationStage::new(&max_map_feedback);
+
     // Feedback to rate the interestingness of an input
+    // This one is composed by two Feedbacks in OR
     let mut feedback = feedback_or!(
-        MaxMapFeedback::new(&edges_observer),
-        MaxMapFeedback::new(&cmps_observer),
-        MaxMapFeedback::new(&allocs_observer)
+        // New maximization map feedback linked to the edges observer and the feedback state
+        max_map_feedback,
+        // Time feedback, this one does not need a feedback state
+        TimeFeedback::new(&time_observer)
     );
 
     // A feedback to choose if an input is a solution or not
-    let mut objective = CrashFeedback::new();
+    let mut objective = feedback_or_fast!(CrashFeedback::new(), TimeoutFeedback::new());
 
     // If not restarting, create a State from scratch
     let mut state = state.unwrap_or_else(|| {
@@ -127,14 +158,27 @@ fn fuzz(corpus_dirs: &[PathBuf], objective_dir: PathBuf, broker_port: u16) -> Re
         .unwrap()
     });
 
+
     println!("We're a client, let's fuzz :)");
 
     // Setup a basic mutator with a mutational stage
-    let mutator = StdScheduledMutator::new(havoc_mutations().merge(tokens_mutations()));
-    let mut stages = tuple_list!(StdMutationalStage::new(mutator));
 
-    // A random policy to get testcasess from the corpus
-    let scheduler = RandScheduler::new();
+    let mutator = StdScheduledMutator::new(havoc_mutations().merge(tokens_mutations()));
+
+    let test_stage:TestStage<_, _, BytesInput, _, _, CorpusPowerTestcaseScore, _, _, _> 
+        = TestStage::new(mutator, &edges_observer);
+
+    let mut stages = tuple_list!(calibration, test_stage);
+
+    // A minimization+queue policy to get testcasess from the corpus
+    let scheduler = IndexesLenTimeMinimizerScheduler::new(
+        &edges_observer,
+        StdWeightedScheduler::with_schedule(
+            &mut state,
+            &edges_observer,
+            Some(PowerSchedule::fast()),
+        ),
+    );
 
     // A fuzzer with feedbacks and a corpus scheduler
     let mut fuzzer = StdFuzzer::new(scheduler, feedback, objective);
@@ -149,14 +193,16 @@ fn fuzz(corpus_dirs: &[PathBuf], objective_dir: PathBuf, broker_port: u16) -> Re
         ExitKind::Ok
     };
 
-    // Create the executor for an in-process function with observers for edge coverage, value-profile and allocations sizes
-    let mut executor = InProcessExecutor::new(
+    // Create the executor for an in-process function with one observer for edge coverage and one for the execution time
+    let mut executor = InProcessExecutor::with_timeout(
         &mut harness,
-        tuple_list!(edges_observer, cmps_observer, allocs_observer),
+        tuple_list!(edges_observer, time_observer),
         &mut fuzzer,
         &mut state,
         &mut restarting_mgr,
+        Duration::new(10, 0),
     )?;
+    // 10 seconds timeout
 
     // The actual target run starts here.
     // Call LLVMFUzzerInitialize() if present.
@@ -173,6 +219,10 @@ fn fuzz(corpus_dirs: &[PathBuf], objective_dir: PathBuf, broker_port: u16) -> Re
         println!("We imported {} inputs from disk.", state.corpus().count());
     }
 
+    // This fuzzer restarts after 1 mio `fuzz_one` executions.
+    // Each fuzz_one will internally do many executions of the target.
+    // If your target is very instable, setting a low count here may help.
+    // However, you will lose a lot of performance that way.
     let iters = 1_000_000;
     fuzzer.fuzz_loop_for(
         &mut stages,
@@ -182,8 +232,9 @@ fn fuzz(corpus_dirs: &[PathBuf], objective_dir: PathBuf, broker_port: u16) -> Re
         iters,
     )?;
 
+    // It's important, that we store the state before restarting!
+    // Else, the parent will not respawn a new child and quit.
     restarting_mgr.on_restart(&mut state)?;
 
-    // Never reached
     Ok(())
 }
