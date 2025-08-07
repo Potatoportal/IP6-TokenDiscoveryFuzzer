@@ -6,6 +6,7 @@ static GLOBAL: MiMalloc = MiMalloc;
 
 use std::{env, path::PathBuf};
 mod test_stage;
+use test_stage::TestStage;
 
 use libafl::{
     corpus::{Corpus, InMemoryCorpus, OnDiskCorpus},
@@ -22,7 +23,8 @@ use libafl::{
     },
     observers::StdMapObserver,
     schedulers::{testcase_score::CorpusPowerTestcaseScore, RandScheduler},
-    state::{HasCorpus, StdState}, Error,
+    state::{HasCorpus, StdState},
+    Error,
 };
 use libafl_bolts::{
     rands::StdRand,
@@ -33,7 +35,10 @@ use libafl_targets::{
     libfuzzer_initialize, libfuzzer_test_one_input, std_edges_map_observer, CMP_MAP,
 };
 
-use test_stage::TestStage;
+const ALLOC_MAP_SIZE: usize = 16 * 1024;
+extern "C" {
+    static mut libafl_alloc_map: [usize; ALLOC_MAP_SIZE];
+}
 
 /// The main fn, usually parsing parameters, and starting the fuzzer
 #[no_mangle]
@@ -85,11 +90,20 @@ fn fuzz(corpus_dirs: &[PathBuf], objective_dir: PathBuf, broker_port: u16) -> Re
 
     // Create an observation channel using the allocations map
     // TODO: This will break soon, fix me! See https://github.com/AFLplusplus/LibAFL/issues/2786
+    #[allow(static_mut_refs)] // only a problem on nightly
+    let allocs_observer = unsafe {
+        StdMapObserver::from_mut_ptr(
+            "allocs",
+            libafl_alloc_map.as_mut_ptr(),
+            libafl_alloc_map.len(),
+        )
+    };
 
     // Feedback to rate the interestingness of an input
     let mut feedback = feedback_or!(
         MaxMapFeedback::new(&edges_observer),
         MaxMapFeedback::new(&cmps_observer),
+        MaxMapFeedback::new(&allocs_observer)
     );
 
     // A feedback to choose if an input is a solution or not
@@ -118,8 +132,10 @@ fn fuzz(corpus_dirs: &[PathBuf], objective_dir: PathBuf, broker_port: u16) -> Re
 
     // Setup a basic mutator with a mutational stage
     let mutator = StdScheduledMutator::new(havoc_mutations().merge(tokens_mutations()));
+
     let test_stage:TestStage<_, _, BytesInput, _, _, CorpusPowerTestcaseScore, _, _, _> 
         = TestStage::new(mutator, &edges_observer);
+
     let mut stages = tuple_list!(test_stage);
 
     // A random policy to get testcasess from the corpus
@@ -141,7 +157,7 @@ fn fuzz(corpus_dirs: &[PathBuf], objective_dir: PathBuf, broker_port: u16) -> Re
     // Create the executor for an in-process function with observers for edge coverage, value-profile and allocations sizes
     let mut executor = InProcessExecutor::new(
         &mut harness,
-        tuple_list!(edges_observer, cmps_observer),
+        tuple_list!(edges_observer, cmps_observer, allocs_observer),
         &mut fuzzer,
         &mut state,
         &mut restarting_mgr,
