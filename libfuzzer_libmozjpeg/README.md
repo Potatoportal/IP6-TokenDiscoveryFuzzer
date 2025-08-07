@@ -20,7 +20,11 @@ Now compile it with:
 
 ```
 cd mozjpeg-4.0.3
-cmake --disable-shared . -DCMAKE_C_COMPILER="$(pwd)/../target/release/libafl_cc" -DCMAKE_CXX_COMPILER="$(pwd)/../target/release/libafl_cxx" -G "Unix Makefiles"
+cmake . \
+  -DBUILD_SHARED_LIBS=OFF \
+  -DCMAKE_C_COMPILER="$(pwd)/../target/release/libafl_cc" \
+  -DCMAKE_CXX_COMPILER="$(pwd)/../target/release/libafl_cxx" \
+  -G "Unix Makefiles"
 make -j `nproc`
 cd ..
 ```
@@ -28,7 +32,7 @@ cd ..
 Now, we have to build the libfuzzer harness and link all together to create our fuzzer binary.
 
 ```
-./target/debug/cxx ./harness.cc ./mozjpeg-4.0.3/*.a -I ./mozjpeg-4.0.3/ -o fuzzer_mozjpeg
+./target/release/libafl_cxx ./harness.cc ./mozjpeg-4.0.3/*.a -I ./mozjpeg-4.0.3/ -o fuzzer_mozjpeg
 ```
 
 Afterward, the fuzzer will be ready to run by simply executing `./fuzzer_mozjpeg`.
