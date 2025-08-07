@@ -1,7 +1,7 @@
 //! A libfuzzer-like fuzzer with llmp-multithreading support and restarts
 //! The example harness is built for libpng.
 use core::time::Duration;
-use std::{collections::{HashMap, HashSet}, env, path::PathBuf};
+use std::{env, path::PathBuf};
 
 mod test_stage;
 
@@ -30,40 +30,14 @@ use libafl_bolts::{
     rands::StdRand, 
     serdeany::RegistryBuilder, 
     tuples::{tuple_list, Merge}, 
-    AsSlice, 
-    SerdeAny,
-
+    AsSlice,
 };
 
 use libafl_targets::{libfuzzer_initialize, libfuzzer_test_one_input, EDGES_MAP, MAX_EDGES_FOUND};
 use mimalloc::MiMalloc;
-use serde::{Serialize, Deserialize};
 
 #[global_allocator]
 static GLOBAL: MiMalloc = MiMalloc;
-
-#[derive(Debug, Serialize, Deserialize, SerdeAny)]
-pub struct SeenTestCases {
-    tescases: HashSet<Vec<u8>>,
-    index_to_values: HashMap<usize, HashSet<u8>>,
-}
-
-impl SeenTestCases
-where {
-
-    pub fn new () -> Self {
-        Self { tescases: HashSet::new(), index_to_values: HashMap::new()}
-    }
-
-    pub fn testcases_mut(&mut self) -> &mut HashSet<Vec<u8>> {
-        &mut self.tescases
-    }
-
-    pub fn index_to_value_map_mut(&mut self) -> &mut HashMap<usize, HashSet<u8>> {
-        &mut self.index_to_values
-    }
-}
-
 
 /// The main fn, `no_mangle` as it is a C main
 #[no_mangle]
@@ -71,8 +45,6 @@ pub extern "C" fn libafl_main() {
     // Registry the metadata types used in this fuzzer
     // Needed only on no_std
     // unsafe { RegistryBuilder::register::<Tokens>(); }
-    
-    unsafe {RegistryBuilder::register::<SeenTestCases>();}
 
     println!(
         "Workdir: {:?}",
