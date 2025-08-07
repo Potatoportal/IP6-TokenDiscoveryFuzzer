@@ -16,14 +16,13 @@ use libafl::{
     monitors::{MultiMonitor, PrometheusMonitor},
     mutators::{
         havoc_mutations::havoc_mutations,
-        scheduled::{tokens_mutations, StdScheduledMutator},
-        token_mutations::Tokens,
+        scheduled::{tokens_mutations, StdScheduledMutator}, Tokens,
     },
     observers::{CanTrack, HitcountsMapObserver, StdMapObserver, TimeObserver},
     schedulers::{
-        powersched::PowerSchedule, testcase_score::CorpusPowerTestcaseScore, IndexesLenTimeMinimizerScheduler, StdWeightedScheduler
+        powersched::PowerSchedule, IndexesLenTimeMinimizerScheduler, StdWeightedScheduler
     },
-    stages::calibrate::CalibrationStage,
+    stages::{calibrate::CalibrationStage, StdPowerMutationalStage},
     state::{HasCorpus, StdState},
     Error, HasMetadata
 };
@@ -38,7 +37,6 @@ use libafl_bolts::{
 
 use libafl_targets::{libfuzzer_initialize, libfuzzer_test_one_input, EDGES_MAP, MAX_EDGES_FOUND};
 use mimalloc::MiMalloc;
-use test_stage::TestStage;
 use serde::{Serialize, Deserialize};
 
 #[global_allocator]
@@ -169,13 +167,12 @@ fn fuzz(corpus_dirs: &[PathBuf], objective_dir: PathBuf, broker_port: u16) -> Re
     }
 
     // Setup a basic mutator with a mutational stage
-
     let mutator = StdScheduledMutator::new(havoc_mutations().merge(tokens_mutations()));
 
-    let test_stage:TestStage<_, _, BytesInput, _, _, CorpusPowerTestcaseScore, _, _, _> 
-        = TestStage::new(mutator, &edges_observer);
+    let power: StdPowerMutationalStage<_, _, BytesInput, _, _, _> =
+        StdPowerMutationalStage::new(mutator);
 
-    let mut stages = tuple_list!(calibration, test_stage);
+    let mut stages = tuple_list!(calibration, power);
 
     // A minimization+queue policy to get testcasess from the corpus
     let scheduler = IndexesLenTimeMinimizerScheduler::new(
