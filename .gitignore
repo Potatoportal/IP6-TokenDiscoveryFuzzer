@@ -7,3 +7,4 @@ libfuzzer_libpng/monitoring/prometheus-data/
 notes.txt
 fuzzer_metrics/
 coverage_notes
+libfuzzer_libmozjpeg/target/
