@@ -26,7 +26,6 @@ use libafl::{
 };
 use libafl_bolts::{
     rands::StdRand, 
-    serdeany::RegistryBuilder, 
     tuples::{tuple_list, Merge}, 
     AsSlice, 
 };
@@ -44,8 +43,6 @@ pub extern "C" fn libafl_main() {
     // Registry the metadata types used in this fuzzer
     // Needed only on no_std
     // unsafe { RegistryBuilder::register::<Tokens>(); }
-    
-    unsafe {RegistryBuilder::register::<SeenTestCases>();}
 
     println!(
         "Workdir: {:?}",
