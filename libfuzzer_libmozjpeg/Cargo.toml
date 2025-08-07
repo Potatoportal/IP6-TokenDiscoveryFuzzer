@@ -25,7 +25,7 @@ which = "6.0.3"
 serde = { version = "1.0", features = ["derive"] }
 
 libafl = {version = "=0.15.2", features = ["default", "prometheus_monitor", "statsd_monitor"]}
-
+libafl_derive = "=0.15.2"
 libafl_bolts = "=0.15.2"
 libafl_targets = { version = "=0.15.2", features = [
   "sancov_pcguard_hitcounts",
