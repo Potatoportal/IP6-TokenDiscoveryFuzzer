@@ -5,11 +5,10 @@ use mimalloc::MiMalloc;
 static GLOBAL: MiMalloc = MiMalloc;
 
 use std::{env, path::PathBuf};
-mod test_stage;
 
 use libafl::{
     corpus::{Corpus, InMemoryCorpus, OnDiskCorpus},
-    events::{setup_restarting_mgr_std, EventConfig},
+    events::{setup_restarting_mgr_std, EventConfig, EventRestarter},
     executors::{inprocess::InProcessExecutor, ExitKind},
     feedback_or,
     feedbacks::{CrashFeedback, MaxMapFeedback},
@@ -65,6 +64,7 @@ fn fuzz(corpus_dirs: &[PathBuf], objective_dir: PathBuf, broker_port: u16) -> Re
     let mon = PrometheusMonitor::new("0.0.0.0:8082".to_string(), |s| log::info!("{s}"));
     let multi = MultiMonitor::new(|s| println!("{s}"));
     let monitor = tuple_list!(mon, multi);
+
     // The restarting state will spawn the same process again as child, then restarted it each time it crashes.
     let (state, mut restarting_mgr) =
         match setup_restarting_mgr_std(monitor, broker_port, EventConfig::from_name("default")) {
@@ -173,7 +173,16 @@ fn fuzz(corpus_dirs: &[PathBuf], objective_dir: PathBuf, broker_port: u16) -> Re
         println!("We imported {} inputs from disk.", state.corpus().count());
     }
 
-    fuzzer.fuzz_loop(&mut stages, &mut executor, &mut state, &mut restarting_mgr)?;
+    let iters = 1_000_000;
+    fuzzer.fuzz_loop_for(
+        &mut stages,
+        &mut executor,
+        &mut state,
+        &mut restarting_mgr,
+        iters,
+    )?;
+
+    restarting_mgr.on_restart(&mut state)?;
 
     // Never reached
     Ok(())
