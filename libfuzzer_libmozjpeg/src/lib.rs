@@ -19,12 +19,12 @@ use libafl::{
     monitors::{MultiMonitor, PrometheusMonitor},
     mutators::{
         havoc_mutations::havoc_mutations,
-        scheduled::{tokens_mutations, StdScheduledMutator},
+        scheduled::{tokens_mutations, StdScheduledMutator}, Tokens,
     },
     observers::StdMapObserver,
     schedulers::{testcase_score::CorpusPowerTestcaseScore, RandScheduler},
     state::{HasCorpus, StdState},
-    Error,
+    Error, HasMetadata,
 };
 use libafl_bolts::{
     rands::StdRand,
@@ -132,6 +132,10 @@ fn fuzz(corpus_dirs: &[PathBuf], objective_dir: PathBuf, broker_port: u16) -> Re
 
     // Setup a basic mutator with a mutational stage
     let mutator = StdScheduledMutator::new(havoc_mutations().merge(tokens_mutations()));
+    
+    if state.metadata_map().get::<Tokens>().is_none() {
+        state.add_metadata(Tokens::new());
+    };
 
     let test_stage:TestStage<_, _, BytesInput, _, _, CorpusPowerTestcaseScore, _, _, _> 
         = TestStage::new(mutator, &edges_observer);
