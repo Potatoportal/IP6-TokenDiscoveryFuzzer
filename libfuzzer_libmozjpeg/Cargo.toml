@@ -24,16 +24,16 @@ which = "6.0.3"
 [dependencies]
 serde = { version = "1.0", features = ["derive"] }
 
-libafl = {version = "0.15.2", features = ["default", "prometheus_monitor", "statsd_monitor"]}
+libafl = {version = "=0.15.2", features = ["default", "prometheus_monitor", "statsd_monitor"]}
 
-libafl_bolts = "0.15.2"
-libafl_targets = { version = "0.15.2", features = [
+libafl_bolts = "=0.15.2"
+libafl_targets = { version = "=0.15.2", features = [
   "sancov_pcguard_hitcounts",
   "libfuzzer",
   "sancov_cmplog",
 ]}
 
-libafl_cc = "0.15.2"
+libafl_cc = "=0.15.2"
 
 log = { version = "0.4.22", features = ["release_max_level_info"] }
 mimalloc = { version = "0.1.43", default-features = false }
