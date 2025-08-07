@@ -4,27 +4,15 @@ use mimalloc::MiMalloc;
 #[global_allocator]
 static GLOBAL: MiMalloc = MiMalloc;
 
-use std::{env, path::PathBuf};
+use std::{env, path::PathBuf, time::Duration};
 mod test_stage;
 use test_stage::TestStage;
 
 use libafl::{
-    corpus::{Corpus, InMemoryCorpus, OnDiskCorpus},
-    events::{setup_restarting_mgr_std, EventConfig, EventRestarter},
-    executors::{inprocess::InProcessExecutor, ExitKind},
-    feedback_or,
-    feedbacks::{CrashFeedback, MaxMapFeedback},
-    fuzzer::{Fuzzer, StdFuzzer},
-    inputs::{BytesInput, HasTargetBytes},
-    monitors::{MultiMonitor, PrometheusMonitor},
-    mutators::{
+    corpus::{Corpus, InMemoryCorpus, OnDiskCorpus}, events::{setup_restarting_mgr_std, EventConfig, EventRestarter}, executors::{inprocess::InProcessExecutor, ExitKind}, feedback_or, feedback_or_fast, feedbacks::{CrashFeedback, MaxMapFeedback, TimeFeedback, TimeoutFeedback}, fuzzer::{Fuzzer, StdFuzzer}, inputs::{BytesInput, HasTargetBytes}, monitors::{MultiMonitor, PrometheusMonitor}, mutators::{
         havoc_mutations::havoc_mutations,
         scheduled::{tokens_mutations, StdScheduledMutator}, Tokens,
-    },
-    observers::StdMapObserver,
-    schedulers::{testcase_score::LenTimeMulTestcaseScore, RandScheduler},
-    state::{HasCorpus, StdState},
-    Error, HasMetadata,
+    }, observers::{CanTrack, HitcountsMapObserver, StdMapObserver, TimeObserver}, schedulers::{powersched::PowerSchedule, testcase_score::CorpusPowerTestcaseScore, IndexesLenTimeMinimizerScheduler, StdWeightedScheduler}, stages::CalibrationStage, state::{HasCorpus, StdState}, Error, HasMetadata
 };
 use libafl_bolts::{
     rands::StdRand,
@@ -32,13 +20,8 @@ use libafl_bolts::{
     AsSlice,
 };
 use libafl_targets::{
-    libfuzzer_initialize, libfuzzer_test_one_input, std_edges_map_observer, CMP_MAP,
+    libfuzzer_initialize, libfuzzer_test_one_input, EDGES_MAP, MAX_EDGES_FOUND,
 };
-
-const ALLOC_MAP_SIZE: usize = 16 * 1024;
-extern "C" {
-    static mut libafl_alloc_map: [usize; ALLOC_MAP_SIZE];
-}
 
 /// The main fn, usually parsing parameters, and starting the fuzzer
 #[no_mangle]
@@ -66,48 +49,42 @@ fn fuzz(corpus_dirs: &[PathBuf], objective_dir: PathBuf, broker_port: u16) -> Re
     let multi = MultiMonitor::new(|s| println!("{s}"));
     let monitor = tuple_list!(mon, multi);
 
-    // The restarting state will spawn the same process again as child, then restarted it each time it crashes.
+     // The restarting state will spawn the same process again as child, then restarted it each time it crashes.
     let (state, mut restarting_mgr) =
-        match setup_restarting_mgr_std(monitor, broker_port, EventConfig::from_name("default")) {
-            Ok(tuple) => tuple,
-            Err(Error::ShuttingDown) => {
-                println!("\nFinished fuzzing. Good bye.");
-                return Ok(());
-            }
-            Err(err) => {
-                panic!("Failed to setup the restarter: {err:?}");
-            }
+        match setup_restarting_mgr_std(monitor, broker_port, EventConfig::AlwaysUnique) {
+            Ok(res) => res,
+            Err(err) => match err {
+                Error::ShuttingDown => {
+                    return Ok(());
+                }
+                _ => {
+                    panic!("Failed to setup the restarter: {err}");
+                }
+            },
         };
 
     // Create an observation channel using the coverage map
-    let edges_observer = unsafe { std_edges_map_observer("edges") };
-
-    // Create an observation channel using the cmp map
-    // TODO: This will break soon, fix me! See https://github.com/AFLplusplus/LibAFL/issues/2786
     #[allow(static_mut_refs)] // only a problem on nightly
-    let cmps_observer =
-        unsafe { StdMapObserver::from_mut_ptr("cmps", CMP_MAP.as_mut_ptr(), CMP_MAP.len()) };
-
-    // Create an observation channel using the allocations map
-    // TODO: This will break soon, fix me! See https://github.com/AFLplusplus/LibAFL/issues/2786
-    #[allow(static_mut_refs)] // only a problem on nightly
-    let allocs_observer = unsafe {
-        StdMapObserver::from_mut_ptr(
-            "allocs",
-            libafl_alloc_map.as_mut_ptr(),
-            libafl_alloc_map.len(),
-        )
+    let edges_observer = unsafe {
+        HitcountsMapObserver::new(StdMapObserver::from_mut_ptr(
+            "edges",
+            EDGES_MAP.as_mut_ptr(),
+            MAX_EDGES_FOUND,
+        ))
+        .track_indices()
     };
+    let time_observer = TimeObserver::new("time");
+    let max_map_feedback = MaxMapFeedback::new(&edges_observer);
+    let calibration = CalibrationStage::new(&max_map_feedback);
 
     // Feedback to rate the interestingness of an input
     let mut feedback = feedback_or!(
-        MaxMapFeedback::new(&edges_observer),
-        MaxMapFeedback::new(&cmps_observer),
-        MaxMapFeedback::new(&allocs_observer)
+        max_map_feedback,
+        TimeFeedback::new(&time_observer)
     );
 
     // A feedback to choose if an input is a solution or not
-    let mut objective = CrashFeedback::new();
+    let mut objective = feedback_or_fast!(CrashFeedback::new(), TimeoutFeedback::new());
 
     // If not restarting, create a State from scratch
     let mut state = state.unwrap_or_else(|| {
@@ -130,20 +107,29 @@ fn fuzz(corpus_dirs: &[PathBuf], objective_dir: PathBuf, broker_port: u16) -> Re
 
     println!("We're a client, let's fuzz :)");
 
-    // Setup a basic mutator with a mutational stage
-    let mutator = StdScheduledMutator::new(havoc_mutations().merge(tokens_mutations()));
-    
     if state.metadata_map().get::<Tokens>().is_none() {
         state.add_metadata(Tokens::new());
     };
 
-    let test_stage:TestStage<_, _, BytesInput, _, _, LenTimeMulTestcaseScore, _, _, _> 
+
+    // Setup a basic mutator with a mutational stage
+    let mutator = StdScheduledMutator::new(havoc_mutations().merge(tokens_mutations()));
+    
+
+    let test_stage:TestStage<_, _, BytesInput, _, _, CorpusPowerTestcaseScore, _, _, _> 
         = TestStage::new(mutator, &edges_observer);
 
-    let mut stages = tuple_list!(test_stage);
+    let mut stages = tuple_list!(calibration, test_stage);
 
-    // A random policy to get testcasess from the corpus
-    let scheduler = RandScheduler::new();
+    // A minimization+queue policy to get testcasess from the corpus
+    let scheduler = IndexesLenTimeMinimizerScheduler::new(
+        &edges_observer,
+        StdWeightedScheduler::with_schedule(
+            &mut state,
+            &edges_observer,
+            Some(PowerSchedule::fast()),
+        ),
+    );
 
     // A fuzzer with feedbacks and a corpus scheduler
     let mut fuzzer = StdFuzzer::new(scheduler, feedback, objective);
@@ -160,12 +146,13 @@ fn fuzz(corpus_dirs: &[PathBuf], objective_dir: PathBuf, broker_port: u16) -> Re
     };
 
     // Create the executor for an in-process function with observers for edge coverage, value-profile and allocations sizes
-    let mut executor = InProcessExecutor::new(
+    let mut executor = InProcessExecutor::with_timeout(
         &mut harness,
-        tuple_list!(edges_observer, cmps_observer, allocs_observer),
+        tuple_list!(edges_observer, time_observer),
         &mut fuzzer,
         &mut state,
         &mut restarting_mgr,
+        Duration::new(10, 0),
     )?;
 
     // The actual target run starts here.
