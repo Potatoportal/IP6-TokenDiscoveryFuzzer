@@ -22,7 +22,7 @@ use libafl::{
         scheduled::{tokens_mutations, StdScheduledMutator}, Tokens,
     },
     observers::StdMapObserver,
-    schedulers::{testcase_score::CorpusPowerTestcaseScore, RandScheduler},
+    schedulers::{powersched::{PowerSchedule}, testcase_score::CorpusPowerTestcaseScore, IndexesLenTimeMinimizerScheduler, StdWeightedScheduler},
     state::{HasCorpus, StdState},
     Error, HasMetadata,
 };
@@ -142,11 +142,20 @@ fn fuzz(corpus_dirs: &[PathBuf], objective_dir: PathBuf, broker_port: u16) -> Re
 
     let mut stages = tuple_list!(test_stage);
 
-    // A random policy to get testcasess from the corpus
-    let scheduler = RandScheduler::new();
+    // A minimization+queue policy to get testcasess from the corpus
+    let scheduler = IndexesLenTimeMinimizerScheduler::new(
+        &edges_observer,
+        StdWeightedScheduler::with_schedule(
+            &mut state,
+            &edges_observer,
+            Some(PowerSchedule::fast()),
+        ),
+    );
+
 
     // A fuzzer with feedbacks and a corpus scheduler
     let mut fuzzer = StdFuzzer::new(scheduler, feedback, objective);
+    
 
     // The wrapped harness function, calling out to the LLVM-style harness
     let mut harness = |input: &BytesInput| {
@@ -181,6 +190,7 @@ fn fuzz(corpus_dirs: &[PathBuf], objective_dir: PathBuf, broker_port: u16) -> Re
             .unwrap_or_else(|_| panic!("Failed to load initial corpus at {:?}", &corpus_dirs));
         println!("We imported {} inputs from disk.", state.corpus().count());
     }
+
 
     fuzzer.fuzz_loop(&mut stages, &mut executor, &mut state, &mut restarting_mgr)?;
 
