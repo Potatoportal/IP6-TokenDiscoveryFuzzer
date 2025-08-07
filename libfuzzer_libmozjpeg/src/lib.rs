@@ -10,7 +10,7 @@ use test_stage::TestStage;
 
 use libafl::{
     corpus::{Corpus, InMemoryCorpus, OnDiskCorpus},
-    events::{setup_restarting_mgr_std, EventConfig},
+    events::{setup_restarting_mgr_std, EventConfig, EventRestarter},
     executors::{inprocess::InProcessExecutor, ExitKind},
     feedback_or,
     feedbacks::{CrashFeedback, MaxMapFeedback},
@@ -183,7 +183,16 @@ fn fuzz(corpus_dirs: &[PathBuf], objective_dir: PathBuf, broker_port: u16) -> Re
         println!("We imported {} inputs from disk.", state.corpus().count());
     }
 
-    fuzzer.fuzz_loop(&mut stages, &mut executor, &mut state, &mut restarting_mgr)?;
+    let iters = 1_000_000;
+    fuzzer.fuzz_loop_for(
+        &mut stages,
+        &mut executor,
+        &mut state,
+        &mut restarting_mgr,
+        iters,
+    )?;
+
+    restarting_mgr.on_restart(&mut state)?;
 
     // Never reached
     Ok(())
