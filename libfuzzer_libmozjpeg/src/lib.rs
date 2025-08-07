@@ -36,6 +36,8 @@ use libafl_targets::{
     libfuzzer_initialize, libfuzzer_test_one_input, std_edges_map_observer, CMP_MAP,
 };
 
+use test_stage::TestStage;
+
 const ALLOC_MAP_SIZE: usize = 16 * 1024;
 extern "C" {
     static mut libafl_alloc_map: [usize; ALLOC_MAP_SIZE];
@@ -131,14 +133,11 @@ fn fuzz(corpus_dirs: &[PathBuf], objective_dir: PathBuf, broker_port: u16) -> Re
 
     println!("We're a client, let's fuzz :)");
 
-    // Add the JPEG tokens if not existing
-    if state.metadata_map().get::<Tokens>().is_none() {
-        state.add_metadata(Tokens::from_file("./jpeg.dict")?);
-    }
-
     // Setup a basic mutator with a mutational stage
     let mutator = HavocScheduledMutator::new(havoc_mutations().merge(tokens_mutations()));
-    let mut stages = tuple_list!(StdMutationalStage::new(mutator));
+    let test_stage:TestStage<_, _, BytesInput, _, _, CorpusPowerTestcaseScore, _, _, _> 
+        = TestStage::new(mutator, &edges_observer);
+    let mut stages = tuple_list!(StdMutationalStage::new(mutator), test_stage);
 
     // A random policy to get testcasess from the corpus
     let scheduler = RandScheduler::new();
