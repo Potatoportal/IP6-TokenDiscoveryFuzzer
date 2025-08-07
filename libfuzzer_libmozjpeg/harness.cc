@@ -5,72 +5,51 @@
 
 struct my_error_mgr {
   struct jpeg_error_mgr pub; /* "public" fields */
-
-  jmp_buf setjmp_buffer; /* for return to caller */
+  jmp_buf setjmp_buffer;     /* for return to caller */
 };
-
 typedef struct my_error_mgr *my_error_ptr;
-
-/*
- * Here's the routine that will replace the standard error_exit method:
- */
 
 METHODDEF(void)
 my_error_exit(j_common_ptr cinfo) {
-  /* cinfo->err really points to a my_error_mgr struct, so coerce pointer */
   my_error_ptr myerr = (my_error_ptr)cinfo->err;
-
-  /* Always display the message. */
-  /* We could postpone this until after returning, if we chose. */
-  (*cinfo->err->output_message)(cinfo);
-
-  /* Return control to the setjmp point */
+  // Silence error output, no printing here
   longjmp(myerr->setjmp_buffer, 1);
+}
+
+METHODDEF(void) my_output_message(j_common_ptr cinfo) {
+  // Silence warning/info messages, do nothing
 }
 
 int do_read_JPEG_file(struct jpeg_decompress_struct *cinfo,
                       const uint8_t *input, size_t len) {
   struct my_error_mgr jerr;
-  /* More stuff */
-  JSAMPARRAY buffer;     /* Output row buffer */
-  int        row_stride; /* physical row width in output buffer */
-  /* Step 1: allocate and initialize JPEG decompression object */
-  /* We set up the normal JPEG error routines, then override error_exit. */
+
+  // Setup custom error handlers once here:
   cinfo->err = jpeg_std_error(&jerr.pub);
   jerr.pub.error_exit = my_error_exit;
-  /* Establish the setjmp return context for my_error_exit to use. */
+  jerr.pub.output_message = my_output_message;
+
   if (setjmp(jerr.setjmp_buffer)) {
-    jpeg_destroy_decompress(cinfo);
     return 0;
   }
-  /* Now we can initialize the JPEG decompression object. */
+
   jpeg_create_decompress(cinfo);
-  /* Step 2: specify data source (eg, a file) */
   jpeg_mem_src(cinfo, input, len);
-  /* Step 3: read file parameters with jpeg_read_header() */
   (void)jpeg_read_header(cinfo, TRUE);
-  /* Step 4: set parameters for decompression */
-  /* In this example, we don't need to change any of the defaults set by
-   * jpeg_read_header(), so we do nothing here.
-   */
-  /* Step 5: Start decompressor */
+
   (void)jpeg_start_decompress(cinfo);
-  /* JSAMPLEs per row in output buffer */
-  row_stride = cinfo->output_width * cinfo->output_components;
-  /* Make a one-row-high sample array that will go away when done with image */
-  buffer = (*cinfo->mem->alloc_sarray)((j_common_ptr)cinfo, JPOOL_IMAGE,
-                                       row_stride, 1);
-  /* Step 6: while (scan lines remain to be read) */
-  /*           jpeg_read_scanlines(...); */
+  int row_stride = cinfo->output_width * cinfo->output_components;
+
+  JSAMPARRAY buffer = (*cinfo->mem->alloc_sarray)(
+      (j_common_ptr)cinfo, JPOOL_IMAGE, row_stride, 1);
+
   while (cinfo->output_scanline < cinfo->output_height) {
     (void)jpeg_read_scanlines(cinfo, buffer, 1);
-    /* Assume put_scanline_someplace wants a pointer and sample count. */
-    // put_scanline_someplace(buffer[0], row_stride);
   }
-  /* Step 7: Finish decompression */
+
   (void)jpeg_finish_decompress(cinfo);
-  /* Step 8: Release JPEG decompression object */
-  // jpeg_destroy_decompress(cinfo);
+  jpeg_destroy_decompress(cinfo);  // cleanup!
+
   return 1;
 }
 
