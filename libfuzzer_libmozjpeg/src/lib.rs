@@ -22,7 +22,7 @@ use libafl::{
         scheduled::{tokens_mutations, StdScheduledMutator}, Tokens,
     },
     observers::StdMapObserver,
-    schedulers::{powersched::{PowerSchedule, SchedulerMetadata}, testcase_score::CorpusPowerTestcaseScore, RandScheduler},
+    schedulers::{testcase_score::LenTimeMulTestcaseScore, RandScheduler},
     state::{HasCorpus, StdState},
     Error, HasMetadata,
 };
@@ -128,8 +128,6 @@ fn fuzz(corpus_dirs: &[PathBuf], objective_dir: PathBuf, broker_port: u16) -> Re
         .unwrap()
     });
 
-    state.add_metadata(SchedulerMetadata::new(Some(PowerSchedule::fast())));
-
     println!("We're a client, let's fuzz :)");
 
     // Setup a basic mutator with a mutational stage
@@ -139,7 +137,7 @@ fn fuzz(corpus_dirs: &[PathBuf], objective_dir: PathBuf, broker_port: u16) -> Re
         state.add_metadata(Tokens::new());
     };
 
-    let test_stage:TestStage<_, _, BytesInput, _, _, CorpusPowerTestcaseScore, _, _, _> 
+    let test_stage:TestStage<_, _, BytesInput, _, _, LenTimeMulTestcaseScore, _, _, _> 
         = TestStage::new(mutator, &edges_observer);
 
     let mut stages = tuple_list!(test_stage);
@@ -185,7 +183,6 @@ fn fuzz(corpus_dirs: &[PathBuf], objective_dir: PathBuf, broker_port: u16) -> Re
         println!("We imported {} inputs from disk.", state.corpus().count());
     }
 
-    
     fuzzer.fuzz_loop(&mut stages, &mut executor, &mut state, &mut restarting_mgr)?;
 
     // Never reached
