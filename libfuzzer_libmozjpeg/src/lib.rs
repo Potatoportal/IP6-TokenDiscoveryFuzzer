@@ -20,21 +20,21 @@ use libafl::{
     },
     observers::{CanTrack, HitcountsMapObserver, StdMapObserver, TimeObserver},
     schedulers::{
-        powersched::PowerSchedule, IndexesLenTimeMinimizerScheduler, StdWeightedScheduler
+        powersched::PowerSchedule, testcase_score::CorpusPowerTestcaseScore, IndexesLenTimeMinimizerScheduler, StdWeightedScheduler
     },
-    stages::{calibrate::CalibrationStage, StdPowerMutationalStage},
+    stages::{calibrate::CalibrationStage},
     state::{HasCorpus, StdState},
     Error, HasMetadata
 };
 use libafl_bolts::{
     rands::StdRand, 
-    serdeany::RegistryBuilder, 
     tuples::{tuple_list, Merge}, 
     AsSlice,
 };
 
 use libafl_targets::{libfuzzer_initialize, libfuzzer_test_one_input, EDGES_MAP, MAX_EDGES_FOUND};
 use mimalloc::MiMalloc;
+use test_stage::TestStage;
 
 #[global_allocator]
 static GLOBAL: MiMalloc = MiMalloc;
@@ -45,7 +45,6 @@ pub extern "C" fn libafl_main() {
     // Registry the metadata types used in this fuzzer
     // Needed only on no_std
     // unsafe { RegistryBuilder::register::<Tokens>(); }
-
     println!(
         "Workdir: {:?}",
         env::current_dir().unwrap().to_string_lossy().to_string()
@@ -135,16 +134,16 @@ fn fuzz(corpus_dirs: &[PathBuf], objective_dir: PathBuf, broker_port: u16) -> Re
 
    // Add the JPEG tokens if not existing
     if state.metadata_map().get::<Tokens>().is_none() {
-        state.add_metadata(Tokens::from_file("./jpeg.dict")?);
+        state.add_metadata(Tokens::new());
     }
 
     // Setup a basic mutator with a mutational stage
     let mutator = StdScheduledMutator::new(havoc_mutations().merge(tokens_mutations()));
 
-    let power: StdPowerMutationalStage<_, _, BytesInput, _, _, _> =
-        StdPowerMutationalStage::new(mutator);
+    let test_stage:TestStage<_, _, BytesInput, _, _, CorpusPowerTestcaseScore, _, _, _> 
+        = TestStage::new(mutator, &edges_observer);
 
-    let mut stages = tuple_list!(calibration, power);
+    let mut stages = tuple_list!(calibration, test_stage);
 
     // A minimization+queue policy to get testcasess from the corpus
     let scheduler = IndexesLenTimeMinimizerScheduler::new(
