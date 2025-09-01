@@ -6,3 +6,4 @@ libfuzzer_libpng/monitoring/grafana-data/
 libfuzzer_libpng/monitoring/prometheus-data/
 fuzzer_metrics/
 libfuzzer_libmozjpeg/target/
+libfuzzer_libmozjpeg/crashes/

@@ -49,8 +49,6 @@ pub extern "C" fn libafl_main() {
     // Registry the metadata types used in this fuzzer
     // Needed only on no_std
     // unsafe { RegistryBuilder::register::<Tokens>(); }
-    
-    unsafe {RegistryBuilder::register::<SeenTestCases>();}
 
     println!(
         "Workdir: {:?}",
@@ -140,7 +138,6 @@ fn fuzz(corpus_dirs: &[PathBuf], objective_dir: PathBuf, broker_port: u16) -> Re
     println!("We're a client, let's fuzz :)");
 
     // add and initialize needed metadata
-    state.add_metadata(SeenTestCases::new());
     if state.metadata_map().get::<Tokens>().is_none() {
         state.add_metadata(Tokens::new());
     };
